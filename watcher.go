@@ -10,8 +10,10 @@ import (
 )
 
 type Traffic struct {
-	Rx float64
-	Tx float64
+	RxTraffic float64
+	RxPacket  uint64
+	TxTraffic float64
+	TxPacket  uint64
 }
 
 type receiver struct {
@@ -21,7 +23,7 @@ type receiver struct {
 }
 
 func newReceiver(bufferSize int, unitSize float64) (*receiver, <-chan Traffic, error) {
-	const pattern = `rx:\s*([\d.]+)\s*(G|M|k)?bit/s.*tx:\s*([\d.]+)\s*(G|M|k)?bit/s`
+	const pattern = `rx:\s*([\d.]+)\s*(G|M|k)?bit/s.*\s*(\d+)\s*p/s\s*tx:\s*([\d.]+)\s*(G|M|k)?bit/s.*\s*(\d+)\s*p/s`
 	regex, err := regexp2.Compile(pattern, 0)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to compile regex: %w", err)
@@ -36,56 +38,73 @@ func newReceiver(bufferSize int, unitSize float64) (*receiver, <-chan Traffic, e
 }
 
 func (r *receiver) Write(p []byte) (n int, err error) {
-	rx, tx := 0.0, 0.0
+	rxTf, txTf, rxPt, txPt := 0.0, 0.0, uint64(0), uint64(0)
 	if m, _ := r.regex.FindStringMatch(string(p)); m != nil {
 		groups := m.Groups()
 
 		rxValue, err := strconv.ParseFloat(groups[1].Captures[0].String(), 64)
 		if err != nil {
-			return 0, fmt.Errorf("failed to parse rx value: %w", err)
+			return 0, fmt.Errorf("failed to parse rxTf value: %w", err)
 		}
 
 		switch len(groups[2].Captures) {
 		case 0:
-			rx = rxValue
+			rxTf = rxValue
 		default:
 			rxUnit := groups[2].Captures[0].String()
 			switch rxUnit {
 			case "G":
-				rx = rxValue * 1e9 / r.unitSize
+				rxTf = rxValue * 1e9 / r.unitSize
 			case "M":
-				rx = rxValue * 1e6 / r.unitSize
+				rxTf = rxValue * 1e6 / r.unitSize
 			case "k":
-				rx = rxValue * 1e3 / r.unitSize
+				rxTf = rxValue * 1e3 / r.unitSize
 			default:
-				rx = rxValue / r.unitSize
+				rxTf = rxValue / r.unitSize
 			}
 		}
 
-		txValue, err := strconv.ParseFloat(groups[3].Captures[0].String(), 64)
+		rxPacket, err := strconv.ParseUint(groups[3].Captures[0].String(), 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("failed to parse tx value: %w", err)
+			return 0, fmt.Errorf("failed to parse rxTf packet: %w", err)
+		}
+		rxPt = rxPacket
+
+		txValue, err := strconv.ParseFloat(groups[4].Captures[0].String(), 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse txTf value: %w", err)
 		}
 
-		switch len(groups[4].Captures) {
+		switch len(groups[5].Captures) {
 		case 0:
-			tx = txValue
+			txTf = txValue
 		default:
-			txUnit := groups[4].Captures[0].String()
+			txUnit := groups[5].Captures[0].String()
 			switch txUnit {
 			case "G":
-				tx = txValue * 1e9 / r.unitSize
+				txTf = txValue * 1e9 / r.unitSize
 			case "M":
-				tx = txValue * 1e6 / r.unitSize
+				txTf = txValue * 1e6 / r.unitSize
 			case "k":
-				tx = txValue * 1e3 / r.unitSize
+				txTf = txValue * 1e3 / r.unitSize
 			default:
-				tx = txValue / r.unitSize
+				txTf = txValue / r.unitSize
 			}
 		}
+
+		txPacket, err := strconv.ParseUint(groups[6].Captures[0].String(), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse txTf packet: %w", err)
+		}
+		txPt = txPacket
 	}
 
-	r.ch <- Traffic{Rx: rx, Tx: tx}
+	r.ch <- Traffic{
+		RxTraffic: rxTf,
+		RxPacket:  rxPt,
+		TxTraffic: txTf,
+		TxPacket:  txPt,
+	}
 
 	return len(p), nil
 }
