@@ -2,6 +2,10 @@
 
 This is a simple command line observing library for vnstat written in Go.
 
+## Requirements
+
+- [vnStat](https://github.com/vergoh/vnstat)
+
 ## Installation
 
 ```bash
