@@ -7,9 +7,11 @@ import (
 	"log"
 	"os/exec"
 	"strconv"
+	"time"
 )
 
 type Traffic struct {
+	Time      time.Time
 	RxTraffic float64
 	RxPacket  uint64
 	TxTraffic float64
@@ -17,12 +19,14 @@ type Traffic struct {
 }
 
 type receiver struct {
-	regex    *regexp2.Regexp
-	ch       chan<- Traffic
-	unitSize float64
+	regex        *regexp2.Regexp
+	ch           chan<- Traffic
+	unitSize     float64
+	previousTime time.Time
+	duration     time.Duration
 }
 
-func newReceiver(bufferSize int, unitSize float64) (*receiver, <-chan Traffic, error) {
+func newReceiver(duration time.Duration, bufferSize int, unitSize float64) (*receiver, <-chan Traffic, error) {
 	const pattern = `rx:\s*([\d.]+)\s*(G|M|k)?bit/s.*\s*(\d+)\s*p/s\s*tx:\s*([\d.]+)\s*(G|M|k)?bit/s.*\s*(\d+)\s*p/s`
 	regex, err := regexp2.Compile(pattern, 0)
 	if err != nil {
@@ -34,10 +38,21 @@ func newReceiver(bufferSize int, unitSize float64) (*receiver, <-chan Traffic, e
 		regex:    regex,
 		ch:       ch,
 		unitSize: unitSize,
+		duration: duration,
 	}, ch, nil
 }
 
 func (r *receiver) Write(p []byte) (n int, err error) {
+	now := time.Now()
+
+	if now.Sub(r.previousTime) < r.duration {
+		return len(p), nil
+	}
+
+	defer func() {
+		r.previousTime = now
+	}()
+	
 	rxTf, txTf, rxPt, txPt := 0.0, 0.0, uint64(0), uint64(0)
 	if m, _ := r.regex.FindStringMatch(string(p)); m != nil {
 		groups := m.Groups()
@@ -100,6 +115,7 @@ func (r *receiver) Write(p []byte) (n int, err error) {
 	}
 
 	r.ch <- Traffic{
+		Time:      now,
 		RxTraffic: rxTf,
 		RxPacket:  rxPt,
 		TxTraffic: txTf,
